@@ -1,0 +1,66 @@
+# === GitHub Actions: Codespace Keep-Alive 24/7 ===
+# This workflow runs every 10 minutes to ensure the Codespace stays alive.
+# It checks if the Codespace is running and starts it if not.
+
+name: Codespace Keep-Alive
+
+on:
+  schedule:
+    # Run every 10 minutes
+    - cron: '*/10 * * * *'
+  
+  # Also allow manual trigger
+  workflow_dispatch:
+
+jobs:
+  keep-alive:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Check Codespace Status
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.CodespaceToken }}
+        run: |
+          echo "🔍 Checking Codespace status..."
+          
+          # Get codespace state
+          STATE=$(gh codespace view --json state -q '.state' 2>/dev/null || echo "Unknown")
+          echo "State: $STATE"
+          echo "state=$STATE" >> $GITHUB_OUTPUT
+          
+          # Get codespace name
+          NAME=$(gh codespace list --json name -q '.[0].name' 2>/dev/null)
+          echo "Name: $NAME"
+          echo "name=$NAME" >> $GITHUB_OUTPUT
+      
+      - name: Start Codespace if stopped
+        if: steps.check.outputs.state != 'Available'
+        env:
+          GH_TOKEN: ${{ secrets.CodespaceToken }}
+          CODESPACE_NAME: ${{ steps.check.outputs.name }}
+        run: |
+          echo "🚀 Codespace is ${{ steps.check.outputs.state }} — starting it..."
+          gh codespace start --codespace "$CODESPACE_NAME" --wait 2>&1
+          echo "✅ Codespace started successfully"
+      
+      - name: Verify Codespace is running
+        if: steps.check.outputs.state != 'Available'
+        env:
+          GH_TOKEN: ${{ secrets.CodespaceToken }}
+        run: |
+          echo "🔍 Verifying Codespace is now available..."
+          sleep 30  # Wait for codespace to fully start
+          STATE=$(gh codespace view --json state -q '.state' 2>/dev/null || echo "Unknown")
+          echo "Final state: $STATE"
+          if [ "$STATE" != "Available" ]; then
+            echo "⚠️ Codespace may not be fully started yet"
+          fi
+      
+      - name: Report Status
+        if: always()
+        run: |
+          echo "📊 Keep-Alive Check Complete"
+          echo "Time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "Codespace: ${{ steps.check.outputs.name }}"
+          echo "State: ${{ steps.check.outputs.state }}"
